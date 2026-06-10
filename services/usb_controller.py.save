@@ -1,0 +1,123 @@
+from usbid import USB
+
+from services.epever_controller import EpeverController
+from services.must_controller import MustController
+
+class USB_Serial():
+
+    usb = USB()
+    
+    devices = {
+        "BMS":None,
+        "Solar_Charger":None,
+        "Inversor":None,
+    }
+    
+    serial_ports = []
+    solar_charge_type = None
+    solar_charge_controller = None
+
+    def __new__(cls):
+        cls.detect_serial_devices()
+        return cls
+
+    @classmethod
+    def get_devices(cls):
+        return cls.serial_ports
+    
+    @classmethod
+    def remove_device(cls, port:str, device:str):
+        cls.devices[device] = port
+        cls.serial_ports.remove(port)
+    
+    @classmethod
+    def clean_device(cls, device:str):
+        cls.devices[device] = None
+        if device == "Solar_Charger":
+            cls.solar_charge_type = None
+            cls.solar_charge_controller = None
+
+    @classmethod
+    def test_solar_controller(cls):
+        try:
+            result = cls.solar_charge_controller.testConnection()
+            if result is None: cls.clean_device("Solar_Charger")
+        
+        except Exception: pass
+
+    @classmethod
+    def connect_solar_charge_controller(cls):
+        # Check if connection exists and test the connection
+        cls. test_solar_controller()
+        
+        # Check if controller is already registered
+        if cls.devices["Solar_Charger"] is None:
+            must = MustController()
+            state, port = must.connect(cls.serial_ports)
+            if state is True:
+                cls.solar_charge_controller = must
+                cls.remove_device(port,"Solar_Charger")
+                cls.solar_charge_type = "Must"
+            else:
+                epever = EpeverController()
+                state, port = epever.connect(cls.serial_ports)
+                if state is True:
+                    cls.solar_charge_controller = epever
+                    cls.remove_device(port,"Solar_Charger")
+                    cls.solar_charge_type = "Epever"
+            
+                
+
+
+    @classmethod
+    def get_solar_controller(cls) -> tuple[EpeverController|MustController,str]:
+        cls.connect_solar_charge_controller()
+        return cls.solar_charge_controller, cls.solar_charge_type
+    
+
+    @classmethod
+    def add_serial_port(cls, serial_device:str):
+        if (serial_device not in cls.serial_ports) and (serial_device not in list(cls.devices.values())):
+            cls.serial_ports.append(serial_device)
+
+    
+    
+    @classmethod
+    def detect_serial_devices(cls):
+        """Function to scan all bus and ports to search serial devices in a USB Hub"""
+
+	cls.serial_ports = []cls.serial_ports = []cls.serial_ports = []cls.serial_ports = []cls.serial_ports = []
+        for bus_key in cls.usb.keys():
+            bus = cls.usb[bus_key]
+
+            for port_key in bus.keys():
+                try:
+                    port = bus[port_key]
+
+                    # If not hub in Usb bus, detect if there is an serial port
+                    try:
+                        serial_device = port.interfaces[0].tty
+                        if "tty" in serial_device:
+                            cls.add_serial_port(serial_device)      
+                    except:
+                        pass
+
+                    childs = int(port.maxchild) + 1
+                    
+                    for i in range(1,childs):
+                        try:
+                            path = bus_key + '-1.' + str(i) + ':1.0'
+                            hub_interface = cls.usb.get_interface(path)
+                            serial_device = str(hub_interface.tty)
+
+                            #print("Detected serial: ", serial_device)
+                            #print("Dictionary: ", cls.devices.values())
+                            #print("List: ", cls.serial_ports)
+
+                            # Check if the tty port exists and has been already detected and add the device if not
+                            if "tty" in serial_device: cls.add_serial_port(serial_device)
+
+                        except:
+                            pass
+                except:
+                    pass
